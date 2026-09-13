@@ -76,21 +76,53 @@ export default function Home() {
     setStatus({ text: '', kind: '' })
   }
 
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
   const onEnhancePhoto = async () => {
     if (!file) return
     setLoading(true)
-    setStatus({ text: 'Mengunggah dan memproses foto…', kind: '' })
+    setStatus({ text: 'Mengunggah foto…', kind: '' })
     try {
       const form = new FormData()
       form.append('file', file)
       form.append('scale', scale)
 
-      const res = await fetch('/api/enhance', { method: 'POST', body: form })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || `Server menolak permintaan (${res.status})`)
+      const startRes = await fetch('/api/enhance-start', { method: 'POST', body: form })
+      const startData = await startRes.json().catch(() => ({}))
+      if (!startRes.ok) throw new Error(startData.error || `Upload ditolak (${startRes.status})`)
+
+      const { taskId } = startData
+      let downloadUrl = null
+      const maxAttempts = 60
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        setStatus({ text: `Memproses foto… (${attempt}/${maxAttempts})`, kind: '' })
+        await sleep(2000)
+
+        const statusRes = await fetch('/api/enhance-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId, scale })
+        })
+        const statusData = await statusRes.json().catch(() => ({}))
+
+        if (statusData.status === 'success') {
+          downloadUrl = statusData.downloadUrl
+          break
+        }
+        if (statusData.status === 'failed') {
+          throw new Error(statusData.error || 'Proses gagal di server')
+        }
+        // status 'waiting' -> lanjut loop
       }
-      const blob = await res.blob()
+
+      if (!downloadUrl) throw new Error('Timeout: proses upscale memakan waktu terlalu lama')
+
+      setStatus({ text: 'Mengambil hasil…', kind: '' })
+      const resultRes = await fetch(`/api/enhance-result?url=${encodeURIComponent(downloadUrl)}`)
+      if (!resultRes.ok) throw new Error('Gagal mengambil hasil gambar')
+      const blob = await resultRes.blob()
+
       setAfterUrl(URL.createObjectURL(blob))
       setSliderValue(50)
       setStatus({ text: 'Selesai. Geser untuk membandingkan.', kind: 'ok' })
