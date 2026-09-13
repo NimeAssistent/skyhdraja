@@ -3,16 +3,30 @@
 import { useState, useRef, useCallback } from 'react'
 
 export default function Home() {
+  const [mode, setMode] = useState('photo') // 'photo' | 'video'
+
+  // --- state foto ---
   const [file, setFile] = useState(null)
   const [beforeUrl, setBeforeUrl] = useState(null)
   const [afterUrl, setAfterUrl] = useState(null)
   const [sliderValue, setSliderValue] = useState(50)
-  const [isPro, setIsPro] = useState(false)
-  const [isMore, setIsMore] = useState(false)
+  const [scale, setScale] = useState('4')
+
+  // --- state video ---
+  const [videoFile, setVideoFile] = useState(null)
+  const [videoBeforeUrl, setVideoBeforeUrl] = useState(null)
+  const [videoAfterUrl, setVideoAfterUrl] = useState(null)
+
   const [loading, setLoading] = useState(false)
   const [status, setStatus] = useState({ text: '', kind: '' })
   const [dragging, setDragging] = useState(false)
   const fileInputRef = useRef(null)
+  const videoInputRef = useRef(null)
+
+  const switchMode = (m) => {
+    setMode(m)
+    setStatus({ text: '', kind: '' })
+  }
 
   const handleFile = useCallback((f) => {
     if (!f.type.startsWith('image/')) {
@@ -27,38 +41,55 @@ export default function Home() {
     setStatus({ text: '', kind: '' })
   }, [])
 
+  const handleVideoFile = useCallback((f) => {
+    if (!f.type.startsWith('video/')) {
+      setStatus({ text: 'File harus berupa video.', kind: 'error' })
+      return
+    }
+    if (f.size > 50 * 1024 * 1024) {
+      setStatus({ text: `Maksimal ukuran video 50MB (video kamu ${(f.size / 1024 / 1024).toFixed(1)}MB).`, kind: 'error' })
+      return
+    }
+    setVideoFile(f)
+    setVideoBeforeUrl(URL.createObjectURL(f))
+    setVideoAfterUrl(null)
+    setStatus({ text: '', kind: '' })
+  }, [])
+
   const onDrop = (e) => {
     e.preventDefault()
     setDragging(false)
-    if (e.dataTransfer.files?.[0]) handleFile(e.dataTransfer.files[0])
+    const f = e.dataTransfer.files?.[0]
+    if (!f) return
+    if (mode === 'photo') handleFile(f)
+    else handleVideoFile(f)
   }
 
   const onReset = () => {
-    setFile(null)
-    setBeforeUrl(null)
-    setAfterUrl(null)
+    if (mode === 'photo') {
+      setFile(null); setBeforeUrl(null); setAfterUrl(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    } else {
+      setVideoFile(null); setVideoBeforeUrl(null); setVideoAfterUrl(null)
+      if (videoInputRef.current) videoInputRef.current.value = ''
+    }
     setStatus({ text: '', kind: '' })
-    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
-  const onEnhance = async () => {
+  const onEnhancePhoto = async () => {
     if (!file) return
     setLoading(true)
-    setStatus({ text: 'Memproses foto…', kind: '' })
-
+    setStatus({ text: 'Mengunggah dan memproses foto…', kind: '' })
     try {
       const form = new FormData()
-      form.append('is_pro_version', isPro ? 'true' : 'false')
-      form.append('is_enhancing_more', isMore ? 'true' : 'false')
       form.append('file', file)
+      form.append('scale', scale)
 
       const res = await fetch('/api/enhance', { method: 'POST', body: form })
-
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || `Server menolak permintaan (${res.status})`)
       }
-
       const blob = await res.blob()
       setAfterUrl(URL.createObjectURL(blob))
       setSliderValue(50)
@@ -70,13 +101,40 @@ export default function Home() {
     }
   }
 
+  const onEnhanceVideo = async () => {
+    if (!videoFile) return
+    setLoading(true)
+    setStatus({ text: 'Mengunggah video… proses bisa memakan waktu 5–10 menit.', kind: '' })
+    try {
+      const form = new FormData()
+      form.append('file', videoFile)
+
+      const res = await fetch('/api/enhance-video', { method: 'POST', body: form })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || `Server menolak permintaan (${res.status})`)
+      }
+      const blob = await res.blob()
+      setVideoAfterUrl(URL.createObjectURL(blob))
+      setStatus({ text: 'Selesai. Video 2K siap diunduh.', kind: 'ok' })
+    } catch (err) {
+      setStatus({ text: 'Gagal memproses: ' + err.message, kind: 'error' })
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const onDownload = () => {
-    if (!afterUrl) return
+    const url = mode === 'photo' ? afterUrl : videoAfterUrl
+    if (!url) return
     const a = document.createElement('a')
-    a.href = afterUrl
-    a.download = 'terang-hd.jpg'
+    a.href = url
+    a.download = mode === 'photo' ? 'terang-hd.jpg' : 'terang-hd.mp4'
     a.click()
   }
+
+  const hasFile = mode === 'photo' ? !!file : !!videoFile
+  const hasResult = mode === 'photo' ? afterUrl && afterUrl !== beforeUrl : !!videoAfterUrl
 
   return (
     <>
@@ -92,14 +150,13 @@ export default function Home() {
         <div>
           <h1>Tarik detail dari gelap ke terang.</h1>
           <p className="lede">
-            Terang memperluas rentang dinamis fotomu — bayangan yang tenggelam
-            diangkat, sorotan yang terbakar dijinakkan, tanpa membuat hasilnya
-            terlihat diedit berlebihan.
+            Terang memperluas rentang dinamis foto dan videomu — bayangan yang
+            tenggelam diangkat, sorotan yang terbakar dijinakkan.
           </p>
           <div className="hero-stats">
-            <div className="stat"><div className="n cyan">+38%</div><div className="l">detail bayangan terangkat</div></div>
-            <div className="stat"><div className="n">−22%</div><div className="l">sorotan yang hangus</div></div>
-            <div className="stat"><div className="n cyan">2×</div><div className="l">resolusi keluaran</div></div>
+            <div className="stat"><div className="n cyan">4×</div><div className="l">skala upscale foto</div></div>
+            <div className="stat"><div className="n">2K</div><div className="l">resolusi video</div></div>
+            <div className="stat"><div className="n cyan">50MB</div><div className="l">batas ukuran video</div></div>
           </div>
         </div>
         <div className="curve-box">
@@ -126,49 +183,86 @@ export default function Home() {
         <div className="panel">
           <div className="panel-head">
             <div>
-              <h2>Unggah foto</h2>
-              <p>JPG atau PNG. Diproses lewat server, bukan langsung dari peramban.</p>
+              <h2>{mode === 'photo' ? 'Unggah foto' : 'Unggah video'}</h2>
+              <p>
+                {mode === 'photo'
+                  ? 'JPG atau PNG, diproses lewat imgupscaler.com.'
+                  : 'MP4, maksimal 50MB, diproses lewat unblurimage.ai (2K, 5–10 menit).'}
+              </p>
+            </div>
+            <div className="tabs">
+              <button
+                type="button"
+                className={'tab' + (mode === 'photo' ? ' active' : '')}
+                onClick={() => switchMode('photo')}
+              >Foto</button>
+              <button
+                type="button"
+                className={'tab' + (mode === 'video' ? ' active' : '')}
+                onClick={() => switchMode('video')}
+              >Video</button>
             </div>
           </div>
 
-          <label
-            className={'dropzone' + (dragging ? ' drag' : '')}
-            onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={onDrop}
-          >
-            <div className="icon">⇧</div>
-            <div className="title">Seret foto ke sini, atau klik untuk memilih</div>
-            <div className="sub">Satu gambar setiap kali proses</div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
-            />
-          </label>
+          {mode === 'photo' ? (
+            <label
+              className={'dropzone' + (dragging ? ' drag' : '')}
+              onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+            >
+              <div className="icon">⇧</div>
+              <div className="title">Seret foto ke sini, atau klik untuk memilih</div>
+              <div className="sub">Satu gambar setiap kali proses</div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
+              />
+            </label>
+          ) : (
+            <label
+              className={'dropzone' + (dragging ? ' drag' : '')}
+              onDragOver={(e) => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+            >
+              <div className="icon">⇧</div>
+              <div className="title">Seret video ke sini, atau klik untuk memilih</div>
+              <div className="sub">MP4, maksimal 50MB</div>
+              <input
+                ref={videoInputRef}
+                type="file"
+                accept="video/*"
+                onChange={(e) => e.target.files?.[0] && handleVideoFile(e.target.files[0])}
+              />
+            </label>
+          )}
 
-          <div className="options">
-            <label className="opt">
-              <input type="checkbox" checked={isPro} onChange={(e) => setIsPro(e.target.checked)} />
-              Mode pro
-            </label>
-            <label className="opt">
-              <input type="checkbox" checked={isMore} onChange={(e) => setIsMore(e.target.checked)} />
-              Perbaikan tambahan
-            </label>
-          </div>
+          {mode === 'photo' && (
+            <div className="options">
+              <label className="opt">
+                Skala upscale
+                <select value={scale} onChange={(e) => setScale(e.target.value)} className="select">
+                  <option value="2">2×</option>
+                  <option value="4">4×</option>
+                  <option value="8">8×</option>
+                </select>
+              </label>
+            </div>
+          )}
 
           <div className="actions">
-            <button className="btn-primary" disabled={!file || loading} onClick={onEnhance}>
-              Perluas rentang cahaya
+            <button
+              className="btn-primary"
+              disabled={!hasFile || loading}
+              onClick={mode === 'photo' ? onEnhancePhoto : onEnhanceVideo}
+            >
+              {mode === 'photo' ? 'Perluas rentang cahaya' : 'Enhance ke 2K'}
             </button>
-            {file && (
-              <button className="btn-ghost" onClick={onReset}>Ganti foto</button>
-            )}
-            {afterUrl && afterUrl !== beforeUrl && (
-              <button className="btn-ghost" onClick={onDownload}>Unduh hasil</button>
-            )}
+            {hasFile && <button className="btn-ghost" onClick={onReset}>Ganti file</button>}
+            {hasResult && <button className="btn-ghost" onClick={onDownload}>Unduh hasil</button>}
           </div>
 
           <div className={'status' + (status.kind ? ' ' + status.kind : '')}>
@@ -176,7 +270,7 @@ export default function Home() {
             {status.text}
           </div>
 
-          {beforeUrl && (
+          {mode === 'photo' && beforeUrl && (
             <div className="compare-area show">
               <div className="compare">
                 <img src={beforeUrl} alt="Sebelum" />
@@ -196,6 +290,21 @@ export default function Home() {
               <div className="compare-labels"><span>Sebelum</span><span>Sesudah</span></div>
             </div>
           )}
+
+          {mode === 'video' && videoBeforeUrl && (
+            <div className="compare-area show video-compare">
+              <div>
+                <div className="compare-labels"><span>Sebelum</span></div>
+                <video src={videoBeforeUrl} controls />
+              </div>
+              {videoAfterUrl && (
+                <div>
+                  <div className="compare-labels"><span>Sesudah (2K)</span></div>
+                  <video src={videoAfterUrl} controls />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
@@ -205,24 +314,24 @@ export default function Home() {
           <div className="step">
             <div className="num">01</div>
             <h3>Unggah</h3>
-            <p>Pilih foto yang bayangannya terlalu gelap atau sorotannya terlalu terang.</p>
+            <p>Pilih foto atau video yang ingin dipertajam.</p>
           </div>
           <div className="step">
             <div className="num">02</div>
             <h3>Proses</h3>
-            <p>Server Next.js meneruskan foto ke layanan enhancer dan menunggu hasilnya.</p>
+            <p>Server Next.js meneruskan file ke layanan enhancer dan menunggu hasilnya.</p>
           </div>
           <div className="step">
             <div className="num">03</div>
             <h3>Bandingkan &amp; unduh</h3>
-            <p>Geser pembanding untuk melihat perubahan, lalu unduh versi penuhnya.</p>
+            <p>Lihat hasilnya, lalu unduh versi penuhnya.</p>
           </div>
         </div>
       </section>
 
       <footer>
-        <span>Terang — antarmuka web untuk layanan enhancer gambar.</span>
-        <span>Permintaan diproses lewat API Route (server), bukan langsung dari peramban.</span>
+        <span>Terang — antarmuka web untuk layanan enhancer foto &amp; video.</span>
+        <span>Diproses lewat API Route (server), bukan langsung dari peramban.</span>
       </footer>
     </>
   )
